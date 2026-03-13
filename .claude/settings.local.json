@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:ryantm.github.io)",
+      "WebFetch(domain:flake.parts)",
+      "WebFetch(domain:mynixos.com)",
+      "WebSearch",
+      "Bash(nix build:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
