@@ -6,7 +6,8 @@
       "WebFetch(domain:mynixos.com)",
       "WebSearch",
       "Bash(nix build:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(ls -la /home/palo/analyze/steampipe-plugin-nomad/nomad/table_*.go)"
     ]
   }
 }
