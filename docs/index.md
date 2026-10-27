@@ -78,7 +78,7 @@ connection "nomad" {
   # address = "http://18.118.164.168:4646"
 
   # The secret ID of ACL token is required for ACL-enabled Nomad servers. Optional.
-  # For more information on the ACL Token, please see https://developer.hashicorp.com/nomad/tutorials/access-control/access-control-tokens.
+  # For more information about the ACL Token, please see https://developer.hashicorp.com/nomad/tutorials/access-control/access-control-tokens.
   # This can also be set via the NOMAD_TOKEN environment variable.
   # secret_id = "c178b810-8b18-6f38-016f-725ddec5d58"
 
@@ -87,9 +87,16 @@ connection "nomad" {
   # This can also be set via the NOMAD_NAMESPACE environment variable.
   # "*" indicates all the namespaces available.
   # namespace = "*"
+
+  # TLS handshake timeout in seconds. Optional.
+  # Increase this if you see "net/http: TLS handshake timeout" errors on slow
+  # or remote links. Default: 30.
+  # tls_timeout_seconds = 60
 }
+
 ```
 
+- `tls_timeout_seconds`: TLS handshake timeout for requests to the Nomad API. Defaults to 30 seconds; increase it when querying a remote cluster over a slow link.
 - `secret_id` parameter is only required to query the ACL tables like `nomad_acl_auth_method`, `nomad_acl_binding_rule`, `nomad_acl_policy`, `nomad_acl_role` and `nomad_acl_token` tables.
 - `namespace` parameter is only required to query the `nomad_namespace` table.
 

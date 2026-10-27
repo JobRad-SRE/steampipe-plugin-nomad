@@ -40,10 +40,9 @@
         ];
 
         packages = with pkgs; [
-          go
+          go_1_26
           gopls
           gotools
-          golangci-lint
           steampipe
         ];
       };

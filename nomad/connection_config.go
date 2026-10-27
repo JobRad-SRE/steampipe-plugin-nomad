@@ -2,17 +2,23 @@ package nomad
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
+	"time"
 
+	cleanhttp "github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/nomad/api"
 	"github.com/turbot/steampipe-plugin-sdk/v5/plugin"
 )
 
 type nomadConfig struct {
-	Address   *string `hcl:"address"`
-	Namespace *string `hcl:"namespace"`
-	SecretID  *string `hcl:"secret_id"`
+	Address          *string `hcl:"address"`
+	Namespace        *string `hcl:"namespace"`
+	SecretID         *string `hcl:"secret_id"`
+	TLSTimeoutSecond *int    `hcl:"tls_timeout_seconds"`
 }
 
 func ConfigInstance() interface{} {
@@ -27,8 +33,38 @@ func GetConfig(connection *plugin.Connection) nomadConfig {
 	return config
 }
 
+// defaultTLSTimeout is applied to the TLS handshake when tls_timeout_seconds
+// is not set. The Nomad SDK default is 10s, which is too tight for slow or
+// remote links.
+const defaultTLSTimeout = 30 * time.Second
+
+func tlsTimeout(config nomadConfig) (time.Duration, error) {
+	if config.TLSTimeoutSecond == nil {
+		return defaultTLSTimeout, nil
+	}
+	t := time.Duration(*config.TLSTimeoutSecond) * time.Second
+	if t <= 0 {
+		return 0, fmt.Errorf("invalid tls_timeout_seconds %d: must be a positive number of seconds", *config.TLSTimeoutSecond)
+	}
+	return t, nil
+}
+
+// getClient returns a Nomad API client for this connection, creating and
+// caching it on first use. The client is reused for the lifetime of the
+// connection so TLS connections are kept alive instead of being re-negotiated
+// on every hydrate call.
 func getClient(ctx context.Context, d *plugin.QueryData) (*api.Client, error) {
 	nomadConfig := GetConfig(d.Connection)
+
+	cacheKey := "nomad_api_client"
+	if cached, ok := d.ConnectionCache.Get(ctx, cacheKey); ok {
+		return cached.(*api.Client), nil
+	}
+
+	timeout, err := tlsTimeout(nomadConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	address := os.Getenv("NOMAD_ADDR")
 	namespace := os.Getenv("NOMAD_NAMESPACE")
@@ -44,14 +80,41 @@ func getClient(ctx context.Context, d *plugin.QueryData) (*api.Client, error) {
 		namespace = *nomadConfig.Namespace
 	}
 
-	if address != "" {
-		con := api.DefaultConfig()
-		con.Address = address
-		con.SecretID = secretId
-		con.Namespace = namespace
-		client, _ := api.NewClient(con)
-		return client, nil
+	if address == "" {
+		return nil, errors.New("'address' or ('address' and 'secret_id') must be set in the connection configuration. Edit your connection configuration file and then restart Steampipe.")
 	}
 
-	return nil, errors.New("'address' or ('address' and 'secret_id') must be set in the connection configuration. Edit your connection configuration file and then restart Steampipe.")
+	// Build our own HTTP client: the SDK pins TLSHandshakeTimeout to 10s and
+	// offers no override, so we construct the transport ourselves.
+	httpClient := cleanhttp.DefaultPooledClient()
+	transport := httpClient.Transport.(*http.Transport)
+	// ConfigureTLS writes to TLSClientConfig; cleanhttp leaves it nil.
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+	transport.TLSHandshakeTimeout = timeout
+
+	con := api.DefaultConfig()
+	con.Address = address
+	con.SecretID = secretId
+	con.Namespace = namespace
+	con.HttpClient = httpClient
+
+	// NewClient skips ConfigureTLS when an HttpClient is supplied, but it
+	// still applies TLSConfig-derived env vars (NOMAD_CACERT etc.), so run it
+	// here to preserve that behavior.
+	if err := api.ConfigureTLS(httpClient, con.TLSConfig); err != nil {
+		return nil, fmt.Errorf("failed to configure TLS: %w", err)
+	}
+
+	client, err := api.NewClient(con)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := d.ConnectionCache.Set(ctx, cacheKey, client); err != nil {
+		return nil, fmt.Errorf("failed to cache Nomad client: %w", err)
+	}
+
+	return client, nil
 }
