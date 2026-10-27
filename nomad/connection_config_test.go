@@ -3,6 +3,9 @@ package nomad
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,5 +137,72 @@ func TestInvalidTLSTimeoutRejected(t *testing.T) {
 	neg := -5
 	if _, err := tlsTimeout(nomadConfig{TLSTimeoutSecond: &neg}); err == nil {
 		t.Fatal("expected error for tls_timeout_seconds = -5")
+	}
+}
+
+// TestMaxConnectionsCapsOpenConnections verifies a burst of concurrent API
+// calls never holds more than max_connections TCP connections to the agent,
+// which is what keeps us under Nomad's http_max_conns_per_client limit.
+func TestMaxConnectionsCapsOpenConnections(t *testing.T) {
+	var mu sync.Mutex
+	open, peak := 0, 0
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{}"))
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch state {
+		case http.StateNew:
+			open++
+			peak = max(peak, open)
+		case http.StateClosed, http.StateHijacked:
+			open--
+		}
+	}
+	srv.StartTLS()
+	defer srv.Close()
+	t.Setenv("NOMAD_SKIP_VERIFY", "true")
+
+	const limit = 4
+	d := newTestQueryData(t, nomadConfig{
+		Address:        new(srv.URL),
+		MaxConnections: new(limit),
+	})
+	client, err := getClient(context.Background(), d)
+	if err != nil {
+		t.Fatalf("getClient: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 100)
+	for range 100 {
+		wg.Go(func() {
+			if _, _, err := client.Jobs().Info("example", nil); err != nil {
+				errs <- err
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("request failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if peak > limit {
+		t.Fatalf("peak concurrent connections = %d, want <= %d", peak, limit)
+	}
+}
+
+// TestInvalidMaxConnectionsRejected verifies zero/negative values are rejected.
+func TestInvalidMaxConnectionsRejected(t *testing.T) {
+	for _, n := range []int{0, -1} {
+		if _, err := maxConnections(nomadConfig{MaxConnections: &n}); err == nil {
+			t.Fatalf("expected error for max_connections = %d", n)
+		}
 	}
 }

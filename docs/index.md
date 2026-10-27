@@ -92,11 +92,18 @@ connection "nomad" {
   # Increase this if you see "net/http: TLS handshake timeout" errors on slow
   # or remote links. Default: 30.
   # tls_timeout_seconds = 60
+
+  # Maximum concurrent connections to the Nomad HTTP API. Optional.
+  # Keep this below the agent's limits.http_max_conns_per_client (default 100),
+  # otherwise Nomad resets the excess connections ("connection reset by peer").
+  # Default: 6.
+  # max_connections = 6
 }
 
 ```
 
 - `tls_timeout_seconds`: TLS handshake timeout for requests to the Nomad API. Defaults to 30 seconds; increase it when querying a remote cluster over a slow link.
+- `max_connections`: Maximum concurrent TCP connections to the Nomad API. Defaults to 6. Nomad agents close connections from one IP beyond [`limits.http_max_conns_per_client`](https://developer.hashicorp.com/nomad/docs/configuration#http_max_conns_per_client) (default 100), which shows up as `connection reset by peer`; keep this value below that limit.
 - `secret_id` parameter is only required to query the ACL tables like `nomad_acl_auth_method`, `nomad_acl_binding_rule`, `nomad_acl_policy`, `nomad_acl_role` and `nomad_acl_token` tables.
 - `namespace` parameter is only required to query the `nomad_namespace` table.
 

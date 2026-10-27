@@ -5,6 +5,7 @@ _Enhancements_
 - Added `tls_timeout_seconds` connection argument to configure the TLS handshake timeout (default 30s, previously a hardcoded 10s in the Nomad SDK). Useful for remote or slow links that fail with `net/http: TLS handshake timeout`.
 - The Nomad API client is now cached per connection, reusing keep-alive TLS connections instead of renegotiating a handshake on every query.
 - Nomad client construction errors are now returned instead of silently ignored.
+- Added `max_connections` connection argument (default 6) capping concurrent connections to the Nomad API. Previously large queries could open hundreds of connections, exceeding Nomad's `limits.http_max_conns_per_client` (default 100) and failing with `connection reset by peer`.
 
 ## v1.2.0 [2025-10-13]
 

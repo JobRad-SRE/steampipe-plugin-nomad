@@ -20,5 +20,11 @@ connection "nomad" {
   # Increase this if you see "net/http: TLS handshake timeout" errors on slow
   # or remote links. Default: 30.
   # tls_timeout_seconds = 60
+
+  # Maximum concurrent connections to the Nomad HTTP API. Optional.
+  # Keep this below the agent's limits.http_max_conns_per_client (default 100),
+  # otherwise Nomad resets the excess connections ("connection reset by peer").
+  # Default: 6.
+  # max_connections = 6
 }
 

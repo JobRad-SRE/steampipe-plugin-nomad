@@ -19,6 +19,7 @@ type nomadConfig struct {
 	Namespace        *string `hcl:"namespace"`
 	SecretID         *string `hcl:"secret_id"`
 	TLSTimeoutSecond *int    `hcl:"tls_timeout_seconds"`
+	MaxConnections   *int    `hcl:"max_connections"`
 }
 
 func ConfigInstance() interface{} {
@@ -49,6 +50,24 @@ func tlsTimeout(config nomadConfig) (time.Duration, error) {
 	return t, nil
 }
 
+// defaultMaxConnections caps concurrent TCP connections to the Nomad HTTP API.
+// Nomad agents close connections from a single IP beyond
+// limits.http_max_conns_per_client (default 100), which surfaces as
+// "connection reset by peer". Steampipe runs up to 500 rows concurrently, and
+// over HTTP/1.1 every in-flight request needs its own connection, so without a
+// cap a single query can exceed the server limit.
+const defaultMaxConnections = 6
+
+func maxConnections(config nomadConfig) (int, error) {
+	if config.MaxConnections == nil {
+		return defaultMaxConnections, nil
+	}
+	if *config.MaxConnections <= 0 {
+		return 0, fmt.Errorf("invalid max_connections %d: must be a positive number", *config.MaxConnections)
+	}
+	return *config.MaxConnections, nil
+}
+
 // getClient returns a Nomad API client for this connection, creating and
 // caching it on first use. The client is reused for the lifetime of the
 // connection so TLS connections are kept alive instead of being re-negotiated
@@ -62,6 +81,10 @@ func getClient(ctx context.Context, d *plugin.QueryData) (*api.Client, error) {
 	}
 
 	timeout, err := tlsTimeout(nomadConfig)
+	if err != nil {
+		return nil, err
+	}
+	maxConns, err := maxConnections(nomadConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +116,12 @@ func getClient(ctx context.Context, d *plugin.QueryData) (*api.Client, error) {
 		MinVersion: tls.VersionTLS12,
 	}
 	transport.TLSHandshakeTimeout = timeout
+	// Requests beyond maxConns wait for a free connection instead of opening
+	// new ones the Nomad agent would reset. Keeping the same number idle lets
+	// the next burst reuse them rather than re-handshaking (cleanhttp keeps only
+	// GOMAXPROCS+1 idle per host).
+	transport.MaxConnsPerHost = maxConns
+	transport.MaxIdleConnsPerHost = maxConns
 
 	con := api.DefaultConfig()
 	con.Address = address
