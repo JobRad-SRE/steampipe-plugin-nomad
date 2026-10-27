@@ -36,7 +36,7 @@ func GetConfig(connection *plugin.Connection) nomadConfig {
 // defaultTLSTimeout is applied to the TLS handshake when tls_timeout_seconds
 // is not set. The Nomad SDK default is 10s, which is too tight for slow or
 // remote links.
-const defaultTLSTimeout = 30 * time.Second
+const defaultTLSTimeout = 3 * time.Minute
 
 func tlsTimeout(config nomadConfig) (time.Duration, error) {
 	if config.TLSTimeoutSecond == nil {
